@@ -24,9 +24,6 @@ std::tuple<int, int, int> solve_for_pmpnpk(int n, int m, int k, int p)
 	double startRange = std::ceil((n * m * k) / p);
 	double endRange = std::floor((n * m * k) / (0.95 * p));
 
-	double bestVal = std::numeric_limits<double>::max();
-	int bestPm = 0, bestPn = 0, bestPk = 0;
-
 	for(double lambda = startRange; lambda <= endRange; lambda++)
 	{
 		double lambda_sqrt = std::cbrt(lambda);
@@ -39,22 +36,11 @@ std::tuple<int, int, int> solve_for_pmpnpk(int n, int m, int k, int p)
 		}
 
 		if(std::max(pm, pn) % std::min(pm, pn) == 0) {
-			double val = pk * m * n + pm * n * k + pn * m * k;
-			if(val < bestVal) {
-				bestVal = val;
-				bestPm = pm;
-				bestPn = pn;
-				bestPk = pk;
-			}
+			return std::make_tuple(pm, pn, pk);
 		}
 	}
 
-	if(bestVal == std::numeric_limits<double>::max()) {
-		std::cerr << "No solution found" << std::endl;
-		exit(1);
-	}
-
-	return std::make_tuple(bestPm, bestPn, bestPk);
+	assert(false);
 }
 
 enum class MatrixType
@@ -96,11 +82,14 @@ public:
 		assert(A.type == MatrixType::A);
 		assert(B.type == MatrixType::B);
 
+		// std::cout<< "A: " << A.numRows << " " << A.numCols << " B: " << B.numRows << " " << B.numCols << "\n";
+		assert(A.numCols == B.numRows);
+
 		for(auto row = 0; row < numRows; row++) {
 			for(auto col = 0; col < numCols; col++) {
 				double sum = 0;
 				for(auto idx = 0; idx < A.numCols; idx++) {
-					sum += A.data[row * A.numCols + idx] * B.data[col * B.numCols + idx];
+					sum += A.data[row * A.numCols + idx] * B.data[col * B.numRows + idx];
 				}
 				data[row * numCols + col] += sum;
 			}
@@ -109,11 +98,11 @@ public:
 	}
 
 	void sendTo(int dest, MPI_Comm comm, MPI_Request *sendRequest) {
-		HR(MPI_Isend(data.data(), data.size(), MPI_DOUBLE, dest, 0, comm, sendRequest));
+		HE(MPI_Isend(data.data(), data.size(), MPI_DOUBLE, dest, 0, comm, sendRequest));
 	}
 
 	void recvFrom(int src, MPI_Comm comm, MPI_Request *recvRequest) {
-		HR(MPI_Irecv(recvBuffer.data(), recvBuffer.size(), MPI_DOUBLE, src, 0, comm, recvRequest));
+		HE(MPI_Irecv(recvBuffer.data(), recvBuffer.size(), MPI_DOUBLE, src, 0, comm, recvRequest));
 	}
 
 	void swap() {
@@ -121,12 +110,12 @@ public:
 	}
 
 	void distribute(MPI_Comm comm) {
-		HR(MPI_Bcast(data.data(), data.size(), MPI_DOUBLE, 0, comm));
+		HE(MPI_Bcast(data.data(), data.size(), MPI_DOUBLE, 0, comm));
 	}
 
 	void gatherResults(MPI_Comm comm) {
 		assert(type == MatrixType::C);
-		HR(MPI_Reduce(data.data(), recvBuffer.data(), data.size(), MPI_DOUBLE, MPI_SUM, 0, comm));
+		HE(MPI_Reduce(data.data(), recvBuffer.data(), data.size(), MPI_DOUBLE, MPI_SUM, 0, comm));
 		data = recvBuffer;
 	}
 
@@ -141,6 +130,36 @@ public:
 			}
 		}
 		return count;
+	}
+
+	void printRow(int rowNum, bool endline) {
+		assert(type == MatrixType::C);
+		for(auto col = 0; col < numCols; col++) {
+			std::cout << data[rowNum * numCols + col];
+			if(col == numCols - 1 && endline) {
+				std::cout << "\n";
+			} else {
+				std::cout << " ";
+			}
+		}
+	}
+
+	void sendRow(int rowNum, MPI_Comm comm) {
+		assert(type == MatrixType::C);
+		HE(MPI_Send(data.data() + rowNum * numCols, numCols, MPI_DOUBLE, 0, 0, comm));
+	}
+
+	void recvPrintRow(int src, MPI_Comm comm, bool endline) {
+		assert(type == MatrixType::C);
+		HE(MPI_Recv(recvBuffer.data(), numCols, MPI_DOUBLE, src, 0, comm, MPI_STATUS_IGNORE));
+		for(auto col = 0; col < numCols; col++) {
+			std::cout << recvBuffer[col];
+			if(col == numCols - 1 && endline) {
+				std::cout << "\n";
+			} else {
+				std::cout << " ";
+			}
+		}
 	}
 
 private:
@@ -161,62 +180,55 @@ public:
 	: cA(cA), cB(cB) {
 		s = std::min(pm, pn);
 
-		// myACanonRank = myKRank % (pm * pn / cA);
-		// myBCanonRank = myKRank % (pm * pn / cB);
-
-		// myACanonGroup = myKRank / (pm * pn / cA);
-		// myBCanonGroup = myKRank / (pm * pn / cB);
-
 		// Create one communicator for distributing A or B to all cannon groups
 		// Create another communicator for sending A and B parts in cannon step
-		if (cA > cB)
-		{
-			myACanonRank = myKRank % (pm * pn / cA);
-			myACanonGroup = myKRank / (pm * pn / cA);
-			myBCanonRank = myACanonRank;
-			myBCanonGroup = myACanonGroup;
-			HR(MPI_Comm_split(kComm, myACanonRank, myACanonGroup, &distributeComm));
-			HR(MPI_Comm_split(kComm, myACanonGroup, myACanonRank, &canComm));
-		}
-		else
-		{
-			myBCanonRank = myKRank % (pm * pn / cB);
-			myBCanonGroup = myKRank / (pm * pn / cB);
-			myACanonRank = myBCanonRank;
-			myACanonGroup = myBCanonGroup;
-			HR(MPI_Comm_split(kComm, myBCanonRank, myBCanonGroup, &distributeComm));
-			HR(MPI_Comm_split(kComm, myBCanonGroup, myBCanonRank, &canComm));
-		}
+		myCanonRank = myKRank % (pm * pn / std::max(cA, cB));
+		myCanonGroup = myKRank / (pm * pn / std::max(cA, cB));
+		HE(MPI_Comm_split(kComm, myCanonRank, myCanonGroup, &distributeComm));
+		HE(MPI_Comm_split(kComm, myCanonGroup, myCanonRank, &canComm));
+
+		int rankCanon, rankDistribute;
+		MPI_Comm_rank(canComm, &rankCanon);
+		MPI_Comm_rank(distributeComm, &rankDistribute);
 		
 		A = Fragment(
 			MatrixType::A,
-			(m / s) * (myACanonRank % s), // how many rows per process * my position in a row
-			firstAColIncl + (k / (pk * s)) * (myACanonRank / s), // k group offset + how many columns per process in k group * my position in a cannon group square
-			(m / s),
-			(k / (pk * s)));
+			(m / pm), // how many rows per process * my position in a row
+			firstAColIncl + ((k / pk) / (pn / cA)) * (myCanonRank / pm), // offset + per k task / how many columns per process  * my column position
+			(m / pm),
+			(k / pk) / (pn / cA));
 
 		B = Fragment(
 			MatrixType::B,
-			firstBRowIncl + (k / (pk * s)) * (myBCanonRank % s), // k group offset + how many rows per process in k group * my position in a cannon group square
-			(n / s) * (myBCanonRank / s), // how many columns per process * my position in a column
-			(k / (pk * s)),
-			(n / s));
+			firstBRowIncl + ((k / pk) / (pm / cB)) * (myCanonRank % pm), // offset + per k task / how many rows per process * my row position
+			(n / pn), // how many columns per process * my position in a column
+			(k / pk) / (pm / cB),
+			(n / pn));
 
 		C = Fragment(
 			MatrixType::C,
-			m / s * (myACanonRank % s),
-			n / s * myBCanonRank / s,
-			(m / (s * cB)),
-			(n / (s * cA))
+			0, // offset does not matter for C
+			0, // offset does not matter for C
+			(m / pm),
+			(n / pn)
 		);
 	}
 
 	void run(int seedA, int seedB) {
-		generate(seedA, seedB);
 		redistribute();
 		for(int i = 0; i < s; i++) {
 			mulStep();
 			sendStep();
+		}
+	}
+
+	void generate(int seedA, int seedB) {
+		// Only generate if we are in the first cannon group
+		if(myCanonGroup == 0 || cA == 1) {
+			A.generate(seedA);
+		}
+		if(myCanonGroup == 0 || cB == 1) {
+			B.generate(seedB);
 		}
 	}
 
@@ -228,33 +240,35 @@ public:
 		return C.countGeq(ge_value);
 	}
 
+	void printRow(int rowNum, bool endline) {
+		C.printRow(rowNum, endline);
+	}
+
+	void sendRow(int rowNum, MPI_Comm comm) {
+		C.sendRow(rowNum, comm);
+	}
+
+	void recvPrintRow(int src, MPI_Comm comm, bool endline) {
+		C.recvPrintRow(src, comm, endline);
+	}
+
 private:
 	int cA, cB;
 	int s;
-	int myACanonRank, myBCanonRank;
-	int myACanonGroup, myBCanonGroup;
+	int myCanonRank;
+	int myCanonGroup;
  	Fragment A, B, C;
 	MPI_Comm canComm;
 	MPI_Comm distributeComm;
 	MPI_Request sendRequest[2];
 	MPI_Request recvRequest[2];
 
-	void generate(int seedA, int seedB) {
-		// Only generate if we are in the first cannon group
-		if(myACanonGroup == 0) {
-			A.generate(seedA);
-		}
-		if(myBCanonGroup == 0) {
-			B.generate(seedB);
-		}
-	}
-
 	void redistribute() 
 	{
 		// this is not asynchronus since we must wait untill all processes have received their data
-		if(cA > 0){
+		if(cA > 1){
 			A.distribute(distributeComm);
-		} else if (cB > 0){
+		} else if (cB > 1){
 			B.distribute(distributeComm);
 		}
 	}
@@ -265,20 +279,20 @@ private:
 
 	void sendStep() {
 		if(s > 1) {
-			int sendATo = (myACanonRank + s*(s - 1)) % (s*s);
-			int sendBTo = (myBCanonRank + s*s - 1) % (s*s);
+			int sendATo = (myCanonRank + s*(s - 1)) % (s*s);
+			int sendBTo = myCanonRank % s == 0 ? myCanonRank + s - 1 : myCanonRank - 1;
 
 			A.sendTo(sendATo, canComm, &sendRequest[0]);
 			B.sendTo(sendBTo, canComm, &sendRequest[1]);
 
-			int recvAFrom = (myACanonRank + s) % (s*s);
-			int recvBFrom = (myBCanonRank + 1) % (s*s);
+			int recvAFrom = (myCanonRank + s) % (s*s);
+			int recvBFrom = (myCanonRank + 1) % s == 0 ? myCanonRank - s + 1 : myCanonRank + 1;
 
 			A.recvFrom(recvAFrom, canComm, &recvRequest[0]);
 			B.recvFrom(recvBFrom, canComm, &recvRequest[1]);
 
-			HR(MPI_Waitall(2, sendRequest, MPI_STATUSES_IGNORE));
-			HR(MPI_Waitall(2, recvRequest, MPI_STATUSES_IGNORE));
+			HE(MPI_Waitall(2, sendRequest, MPI_STATUSES_IGNORE));
+			HE(MPI_Waitall(2, recvRequest, MPI_STATUSES_IGNORE));
 
 			A.swap();
 			B.swap();
@@ -290,22 +304,28 @@ class KTask
 {
 public:
 	KTask(int m, int n, int k, int pm, int pn, int pk, int myRank, MPI_Comm newworld)
-	: pk(pk) {
+	: n(n), m(m), k(k), pm(pm), pn(pn), pk(pk) {
 		myKRank = myRank % (pm * pn);
 		myKGroup = myRank / (pm * pn);
+		// for gathering results
 		MPI_Comm_split(newworld, myKRank, myKGroup, &outsideKComm);
 		
-		int s = std::min(pm, pn);
-		int myKCol = myKRank / s;
-		int myKRow = myKRank % s;
+		// int s = std::min(pm, pn);
+		int myKCol = myKRank / pm;
+		int myKRow = myKRank % pm;
 		MPI_Comm_split(newworld, myKGroup, myKRank, &insideKComm);
 		// communicator for printing results, only used by k group 0
-		MPI_Comm_split(newworld, myKGroup, myKCol * s + myKRow, &resultPrintComm);
+		myPrintRank =  myKRow * pn + myKCol;
+		MPI_Comm_split(newworld, myKGroup, myPrintRank, &resultPrintComm);
+
+		int rankOutside, rankInside, rankPrint;
+		MPI_Comm_rank(outsideKComm, &rankOutside);
+		MPI_Comm_rank(insideKComm, &rankInside);
+		MPI_Comm_rank(resultPrintComm, &rankPrint);
+
 
 		int cA = pn > pm ? pn / pm : 1;
 		int cB = pm > pn ? pm / pn : 1;
-		// int cA = pn > pm ? pn / std::min(pm, pk) : 1;
-		// int cB = pm > pn ? pm / std::min(pn, pk) : 1;
 
 		int firstAColIncl = myKGroup * k / pk;
 		int firstBRowIncl = myKRank * k / pk;
@@ -314,13 +334,14 @@ public:
 	}
 
 	void run(int seedA, int seedB) {
+		if(myKGroup == 0) {
+			canonGroup.generate(seedA, seedB);
+		}
 		canonGroup.run(seedA, seedB);
 	}
 
 	void gatherResults() {
 		if(pk > 1) {
-			std::cout << "k group: " << myKGroup << " k rank: " << myKRank << std::endl;
-			std::cout << "pk > 1" << std::endl;
 			canonGroup.gatherResults(outsideKComm);
 		}
 	}
@@ -329,9 +350,30 @@ public:
 		if(myKGroup == 0) {
 			unsigned long long int count = canonGroup.countGeq(ge_value);
 			unsigned long long int result;
-			HR(MPI_Reduce(&count, &result, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, resultPrintComm));
+			HE(MPI_Reduce(&count, &result, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, resultPrintComm));
 			if(myKRank == 0) {
-				std::cout << result << std::endl;
+				std::cout << result << "\n";
+			}
+		}
+	}
+
+	void printResults() {
+		if(myKGroup == 0) {
+			for(int rowProc = 0; rowProc < pm; rowProc++) {
+				for(int rowNum = 0; rowNum < m / pm; rowNum++) {
+					for(int colProc = 0; colProc < pn; colProc++) {
+						int curr = rowProc * pn + colProc;
+						bool endline = colProc == pn - 1;
+						if(curr == 0 && myPrintRank == 0) {
+							canonGroup.printRow(rowNum, endline);
+						} else if(myPrintRank == (rowProc * pn + colProc)) {
+							canonGroup.sendRow(rowNum, resultPrintComm);
+						} else if(myPrintRank == 0) {
+							canonGroup.recvPrintRow(rowProc * pn + colProc, resultPrintComm, endline);
+						}
+						HE(MPI_Barrier(resultPrintComm));
+					}
+				}
 			}
 		}
 	}
@@ -339,7 +381,9 @@ public:
 private:
 	int myKRank;
 	int myKGroup;
-	int pk;
+	int myPrintRank;
+	int n, m, k;
+	int pm ,pn, pk;
 	MPI_Comm outsideKComm;
 	MPI_Comm insideKComm;
 	MPI_Comm resultPrintComm;
@@ -360,6 +404,12 @@ public:
 			if(pargs.g_flag) {
 				ktask.gatherResults();
 				ktask.countGeq(pargs.ge_value);
+			} else if(pargs.v_flag) {
+				if(myRank == 0) {
+					std::cout << pargs.m << " " << pargs.n << "\n";
+				}
+				ktask.gatherResults();
+				ktask.printResults();
 			}
 		}
 	}

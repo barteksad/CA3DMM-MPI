@@ -24,7 +24,7 @@ namespace {
 	}
 }
 
-#define HR( err) (handleError( err, __FILE__, __LINE__ ))
+#define HE( err) (handleError( err, __FILE__, __LINE__ ))
 
 using seed_t = std::pair<int, int>;
 

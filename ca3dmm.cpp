@@ -33,21 +33,25 @@ int main(int argc, char **argv) {
 
 	int pm, pn, pk;
 	std::tie(pm, pn, pk) = solve_for_pmpnpk(args.n, args.m, args.k, numProcesses);
-	// if(myRank == 0) {
+	if(myRank == 0) {
 
-	// 	std::cout << "pm: " << pm << std::endl;
-	// 	std::cout << "pn: " << pn << std::endl;
-	// 	std::cout << "pk: " << pk << std::endl;
-	// }
+		std::cout << "pm: " << pm << std::endl;
+		std::cout << "pn: " << pn << std::endl;
+		std::cout << "pk: " << pk << std::endl;
+	}
 
 	// Exit processes with ranks not in [0, pm * pn * pk - 1]
-	MPI_Group world_group;
-	MPI_Comm_group(MPI_COMM_WORLD, &world_group);
-	MPI_Group new_group;
-	int ranges[1][3] = {{ pm * pn * pk, numProcesses-1, 1 }};
-	MPI_Group_range_excl(world_group, 1, ranges, &new_group);
 	MPI_Comm newworld;
-	MPI_Comm_create(MPI_COMM_WORLD, new_group, &newworld);
+	if(pm * pn * pk == numProcesses) {
+		newworld = MPI_COMM_WORLD;
+	} else {
+		MPI_Group world_group;
+		MPI_Comm_group(MPI_COMM_WORLD, &world_group);
+		MPI_Group new_group;
+		int ranges[1][3] = {{ pm * pn * pk, numProcesses-1, 1 }};
+		MPI_Group_range_excl(world_group, 1, ranges, &new_group);
+		MPI_Comm_create(MPI_COMM_WORLD, new_group, &newworld);
+	}
 
 	if (newworld == MPI_COMM_NULL)
 	{
@@ -60,6 +64,6 @@ int main(int argc, char **argv) {
 		mp.run();
 	}
 
-	MPI_Finalize();
+	HE(MPI_Finalize());
 	return 0;
 }

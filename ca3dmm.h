@@ -172,7 +172,8 @@ public:
 		}
 	}
 
-private:
+// private:
+public:
 	// to increase locality of memory access, A is stored as row-major, B is stored as column-major
 	std::vector<double> data;
 	std::vector<double> recvBuffer;
@@ -200,28 +201,11 @@ public:
 		int rankCanon, rankDistribute;
 		MPI_Comm_rank(canComm, &rankCanon);
 		MPI_Comm_rank(distributeComm, &rankDistribute);
-
-		// std::cout << "myKRank: " << myKRank << "\n"
-		// 		  << "myCanonRank: " << myCanonRank << "\n"
-		// 		  << "myCanonGroup: " << myCanonGroup << "\n"
-		// 		  << "rankCanon: " << rankCanon << "\n"
-		// 		  << "rankDistribute: " << rankDistribute << "\n"
-		// 		  << "firstAColIncl: " << firstAColIncl << "\n"
-		// 		  << "firstBRowIncl: " << firstBRowIncl << "\n"
-		// 		  << "A row offset: " << (cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn)) << "\n"
-		// 		  << "A col offset: " << firstAColIncl + (k / (pk * s)) * (myCanonRank / s) << "\n"
-		// 		  << "A num rows: " << (m / pm) << "\n"
-		// 		  << "A num cols: " << (k / (pk * s)) << "\n"
-		// 		  << "B row offset: " << firstBRowIncl + (k / (pk * s)) * (myCanonRank % s) << "\n"
-		// 		  << "B col offset: " << (cA == 1 ? (n / (pk * pn)) * (myCanonRank / pn) : (n / (pk * pm)) * myCanonGroup + (n / (pk * pm * pm)) * (myCanonRank / pm)) << "\n"
-		// 		  << "B num rows: " << (k / (pk * s)) << "\n"
-		// 		  << "B num cols: " << (n / pn) << "\n"
-		// 		  << " --------------- \n\n";
 		
 		A = Fragment(
 			MatrixType::A,
-			// (m / (pm / cB)) * myCanonGroup + (m / pm) * (myCanonRank % s), // how many rows per process * my position in a row
-			cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn), // how many rows per process * my position in a row
+			// cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn), // how many rows per process * my position in a row
+			cB == 1 ? (m / pm) * (myCanonRank % pm) : (m / cB) * myCanonGroup + (m / (cB * pn)) * (myCanonRank % pn), // how many rows per process * my position in a row
 			firstAColIncl + (k / (pk * s)) * (myCanonRank / s), // offset + per k task / how many columns per process  * my column position
 			(m / pm),
 			(k / (pk * s)));
@@ -230,17 +214,34 @@ public:
 			MatrixType::B,
 			firstBRowIncl + (k / (pk * s)) * (myCanonRank % s), // offset + per k task / how many rows per process * my row position
 			// (n / (pn / cA)) * myCanonGroup + (n / pn) * (myCanonRank / s), // how many columns per process * my position in a column
-			cA == 1 ? (n / (pk * pn)) * (myCanonRank / pn) : (n / (pk * pm)) * myCanonGroup + (n / (pk * pm * pm)) * (myCanonRank / pm), // how many columns per process * my position in a column
+			cA == 1 ? (n / pn) * (myCanonRank / pn) : (n / cA) * myCanonGroup + (n / (cA * pm)) * (myCanonRank / pm), // how many columns per process * my position in a column
 			(k / (pk * s)),
 			(n / pn));
 
 		C = Fragment(
 			MatrixType::C,
-			cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn),
-			cA == 1 ? (n / (pk * pn)) * (myCanonRank / pn) : (n / (pk * pm)) * myCanonGroup + (n / (pk * pm * pm)) * (myCanonRank / pm),
+			cB == 1 ? (m / pm) * (myCanonRank % pm) : (m / cB) * myCanonGroup + (m / (cB * pn)) * (myCanonRank % pn),
+			cA == 1 ? (n / pn) * (myCanonRank / pn) : (n / cA) * myCanonGroup + (n / (cA * pm)) * (myCanonRank / pm),
 			(m / pm),
 			(n / pn)
 		);
+
+				// std::cout << "My kRank: " << myKRank << "\n"
+				//   << "My canon rank: " << myCanonRank << "\n"
+				//   << "My canon group: " << myCanonGroup << "\n"
+				//   << "A row offset: " << A.rowOffset << "\n"
+				//   << "A col offset: " << A.colOffset << "\n"
+				//   << "A num rows: " << A.numRows << "\n"
+				//   << "A num cols: " << A.numCols << "\n"
+				//   << "B row offset: " << B.rowOffset << "\n"
+				//   << "B col offset: " << B.colOffset << "\n"
+				//   << "B num rows: " << B.numRows << "\n"
+				//   << "B num cols: " << B.numCols << "\n"
+				// 	<< "C row offset: " << C.rowOffset << "\n"
+				// 	<< "C col offset: " << C.colOffset << "\n"			
+				// 	<< "C num rows: " << C.numRows << "\n"
+				// 	<< "C num cols: " << C.numCols << "\n"
+				//   << " --------------- \n\n";
 	}
 
 	void run(int seedA, int seedB) {

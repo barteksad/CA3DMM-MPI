@@ -33,12 +33,12 @@ int main(int argc, char **argv) {
 
 	int pm, pn, pk;
 	std::tie(pm, pn, pk) = solve_for_pmpnpk(args.n, args.m, args.k, numProcesses);
-	if(myRank == 0) {
+	// if(myRank == 0) {
 
-		std::cout << "pm: " << pm << std::endl;
-		std::cout << "pn: " << pn << std::endl;
-		std::cout << "pk: " << pk << std::endl;
-	}
+	// 	std::cout << "pm: " << pm << std::endl;
+	// 	std::cout << "pn: " << pn << std::endl;
+	// 	std::cout << "pk: " << pk << std::endl;
+	// }
 
 	// Exit processes with ranks not in [0, pm * pn * pk - 1]
 	MPI_Comm newworld;

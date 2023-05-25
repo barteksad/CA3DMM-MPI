@@ -14,33 +14,32 @@
 
 std::tuple<int, int, int> solve_for_pmpnpk(int n, int m, int k, int p)
 {
-	/*
-		This function uses Lagrange Multipliers to solve the following problem:
-		minimize pk * m * n + pm * n * k + pn * m * k
-		subject to: 0.95 * p <= pm * pn * pk <= p
-				and mod(max(pm, pn), min(pm, pk)) == 0
-	*/
+	int best = std::numeric_limits<int>::max();
+	int bestPm=-1, bestPn=-1, bestPk=-1;
 
-	double startRange = std::ceil((n * m * k) / p);
-	double endRange = std::floor((n * m * k) / (0.95 * p));
-
-	for(double lambda = startRange; lambda <= endRange; lambda++)
+	for(int pm = 1; pm <= p; pm ++)
 	{
-		double lambda_sqrt = std::cbrt(lambda);
-		int pm = m / lambda_sqrt;
-		int pn = n / lambda_sqrt;
-		int pk = k / lambda_sqrt;
+		for(int pn = 1; pn <= p; pn ++)
+		{
+			for(int pk = 1; pk <= p; pk ++)
+			{
+				int nProc = pm * pn * pk;
+				if(nProc > p || nProc < p * 0.95) continue;
+				if(std::max(pm, pn) % std::min(pm, pn) != 0) continue;
 
-		if(pm*pn*pk == 0) {
-			continue;
-		}
-
-		if(std::max(pm, pn) % std::min(pm, pn) == 0) {
-			return std::make_tuple(pm, pn, pk);
+				int comCost = pk * m * n + pm * n * k + pn * k * m;
+				if(comCost <= best)
+				{
+					best = comCost;
+					bestPm = pm;
+					bestPn = pn;
+					bestPk = pk;
+				}
+			}
 		}
 	}
 
-	assert(false);
+	return std::make_tuple(bestPm, bestPn, bestPk);
 }
 
 enum class MatrixType
@@ -64,6 +63,9 @@ public:
 			for(auto row = 0; row < numRows; row++) {
 				for(auto col = 0; col < numCols; col++) {
 					data[row * numCols + col] = generate_double(seed, row + rowOffset, col + colOffset);
+					// if(data[row * numCols + col] > 0) {
+					// 	std::cout << "A[" << row + rowOffset << ", " << col + colOffset << "] = " << data[row * numCols + col] << std::endl;
+					// }
 				}
 			}
 		}
@@ -72,6 +74,9 @@ public:
 			for(auto col = 0; col < numCols; col++) {
 				for(auto row = 0; row < numRows; row++) {
 					data[col * numRows + row] = generate_double(seed, row + rowOffset, col + colOffset);
+					// if(data[col * numRows + row] > 0) {
+					// 	std::cout << "B[" << row + rowOffset << ", " << col + colOffset << "] = " << data[col * numRows + row] << std::endl;
+					// }
 				}
 			}
 		}
@@ -82,7 +87,6 @@ public:
 		assert(A.type == MatrixType::A);
 		assert(B.type == MatrixType::B);
 
-		// std::cout<< "A: " << A.numRows << " " << A.numCols << " B: " << B.numRows << " " << B.numCols << "\n";
 		assert(A.numCols == B.numRows);
 
 		for(auto row = 0; row < numRows; row++) {
@@ -91,6 +95,8 @@ public:
 				for(auto idx = 0; idx < A.numCols; idx++) {
 					sum += A.data[row * A.numCols + idx] * B.data[col * B.numRows + idx];
 				}
+				// if(sum > 0)
+				// 	std::cout << "C[" << row + A.rowOffset << "," << col + B.colOffset << "] += " << sum << "\n";
 				data[row * numCols + col] += sum;
 			}
 		}
@@ -106,7 +112,7 @@ public:
 	}
 
 	void swap() {
-		recvBuffer = data;
+		data = recvBuffer;
 	}
 
 	void distribute(MPI_Comm comm) {
@@ -144,14 +150,18 @@ public:
 		}
 	}
 
-	void sendRow(int rowNum, MPI_Comm comm) {
+	void checkSendRow(int rowNum, int colNum, MPI_Comm comm) {
 		assert(type == MatrixType::C);
-		HE(MPI_Send(data.data() + rowNum * numCols, numCols, MPI_DOUBLE, 0, 0, comm));
+		if(rowNum >= rowOffset && rowNum < rowOffset + numRows && colNum >= colOffset && colNum < colOffset + numCols) {
+			rowNum %= numRows;
+			colNum %= numCols;
+			HE(MPI_Send(data.data() + rowNum * numCols, numCols, MPI_DOUBLE, 0, 0, comm));
+		}
 	}
 
-	void recvPrintRow(int src, MPI_Comm comm, bool endline) {
+	void recvPrintRow(MPI_Comm comm, bool endline) {
 		assert(type == MatrixType::C);
-		HE(MPI_Recv(recvBuffer.data(), numCols, MPI_DOUBLE, src, 0, comm, MPI_STATUS_IGNORE));
+		HE(MPI_Recv(recvBuffer.data(), numCols, MPI_DOUBLE, MPI_ANY_SOURCE, 0, comm, MPI_STATUS_IGNORE));
 		for(auto col = 0; col < numCols; col++) {
 			std::cout << recvBuffer[col];
 			if(col == numCols - 1 && endline) {
@@ -190,25 +200,44 @@ public:
 		int rankCanon, rankDistribute;
 		MPI_Comm_rank(canComm, &rankCanon);
 		MPI_Comm_rank(distributeComm, &rankDistribute);
+
+		// std::cout << "myKRank: " << myKRank << "\n"
+		// 		  << "myCanonRank: " << myCanonRank << "\n"
+		// 		  << "myCanonGroup: " << myCanonGroup << "\n"
+		// 		  << "rankCanon: " << rankCanon << "\n"
+		// 		  << "rankDistribute: " << rankDistribute << "\n"
+		// 		  << "firstAColIncl: " << firstAColIncl << "\n"
+		// 		  << "firstBRowIncl: " << firstBRowIncl << "\n"
+		// 		  << "A row offset: " << (cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn)) << "\n"
+		// 		  << "A col offset: " << firstAColIncl + (k / (pk * s)) * (myCanonRank / s) << "\n"
+		// 		  << "A num rows: " << (m / pm) << "\n"
+		// 		  << "A num cols: " << (k / (pk * s)) << "\n"
+		// 		  << "B row offset: " << firstBRowIncl + (k / (pk * s)) * (myCanonRank % s) << "\n"
+		// 		  << "B col offset: " << (cA == 1 ? (n / (pk * pn)) * (myCanonRank / pn) : (n / (pk * pm)) * myCanonGroup + (n / (pk * pm * pm)) * (myCanonRank / pm)) << "\n"
+		// 		  << "B num rows: " << (k / (pk * s)) << "\n"
+		// 		  << "B num cols: " << (n / pn) << "\n"
+		// 		  << " --------------- \n\n";
 		
 		A = Fragment(
 			MatrixType::A,
-			(m / pm), // how many rows per process * my position in a row
-			firstAColIncl + ((k / pk) / (pn / cA)) * (myCanonRank / pm), // offset + per k task / how many columns per process  * my column position
+			// (m / (pm / cB)) * myCanonGroup + (m / pm) * (myCanonRank % s), // how many rows per process * my position in a row
+			cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn), // how many rows per process * my position in a row
+			firstAColIncl + (k / (pk * s)) * (myCanonRank / s), // offset + per k task / how many columns per process  * my column position
 			(m / pm),
-			(k / pk) / (pn / cA));
+			(k / (pk * s)));
 
 		B = Fragment(
 			MatrixType::B,
-			firstBRowIncl + ((k / pk) / (pm / cB)) * (myCanonRank % pm), // offset + per k task / how many rows per process * my row position
-			(n / pn), // how many columns per process * my position in a column
-			(k / pk) / (pm / cB),
+			firstBRowIncl + (k / (pk * s)) * (myCanonRank % s), // offset + per k task / how many rows per process * my row position
+			// (n / (pn / cA)) * myCanonGroup + (n / pn) * (myCanonRank / s), // how many columns per process * my position in a column
+			cA == 1 ? (n / (pk * pn)) * (myCanonRank / pn) : (n / (pk * pm)) * myCanonGroup + (n / (pk * pm * pm)) * (myCanonRank / pm), // how many columns per process * my position in a column
+			(k / (pk * s)),
 			(n / pn));
 
 		C = Fragment(
 			MatrixType::C,
-			0, // offset does not matter for C
-			0, // offset does not matter for C
+			cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn),
+			cA == 1 ? (n / (pk * pn)) * (myCanonRank / pn) : (n / (pk * pm)) * myCanonGroup + (n / (pk * pm * pm)) * (myCanonRank / pm),
 			(m / pm),
 			(n / pn)
 		);
@@ -216,6 +245,7 @@ public:
 
 	void run(int seedA, int seedB) {
 		redistribute();
+		initialCanonSkewSend();
 		for(int i = 0; i < s; i++) {
 			mulStep();
 			sendStep();
@@ -244,12 +274,12 @@ public:
 		C.printRow(rowNum, endline);
 	}
 
-	void sendRow(int rowNum, MPI_Comm comm) {
-		C.sendRow(rowNum, comm);
+	void checkSendRow(int rowNum, int colNum, MPI_Comm comm) {
+		C.checkSendRow(rowNum, colNum, comm);
 	}
 
-	void recvPrintRow(int src, MPI_Comm comm, bool endline) {
-		C.recvPrintRow(src, comm, endline);
+	void recvPrintRow(MPI_Comm comm, bool endline) {
+		C.recvPrintRow(comm, endline);
 	}
 
 private:
@@ -291,11 +321,61 @@ private:
 			A.recvFrom(recvAFrom, canComm, &recvRequest[0]);
 			B.recvFrom(recvBFrom, canComm, &recvRequest[1]);
 
+			// std::cout << "Rank " << myCanonRank << " sending A to " << sendATo << " and B to " << sendBTo << "\n" << "receiving A from " << recvAFrom << " and B from " << recvBFrom << "\n\n";
+
 			HE(MPI_Waitall(2, sendRequest, MPI_STATUSES_IGNORE));
 			HE(MPI_Waitall(2, recvRequest, MPI_STATUSES_IGNORE));
 
 			A.swap();
 			B.swap();
+		}
+	}
+
+	void initialCanonSkewSend() {
+		if(s > 1) {
+			MPI_Request waitFor[4];
+			int nWaitFor = 0;
+
+			int aSkew = myCanonRank % s;
+			int bSkew = myCanonRank / s;
+			int bOffset = (myCanonRank / s) * s;
+
+			int sendATo = (myCanonRank + s*(s - aSkew)) % (s*s);
+			int sendBTo = (myCanonRank - bOffset + (s - bSkew)) % s + bOffset;
+
+			// std::cout << "init: Rank " << myCanonRank << " sending A to " << sendATo << " and B to " << sendBTo << "\n";
+
+			if(sendATo != myCanonRank) {
+				A.sendTo(sendATo, canComm, &sendRequest[0]);
+				waitFor[nWaitFor++] = sendRequest[0];
+			}
+			if(sendBTo != myCanonRank) {
+				B.sendTo(sendBTo, canComm, &sendRequest[1]);
+				waitFor[nWaitFor++] = sendRequest[1];
+			}
+
+			int recvAFrom = (myCanonRank + s*(s + aSkew)) % (s*s);
+			int recvBFrom = (myCanonRank - bOffset + bSkew) % s + bOffset;
+
+			// std::cout << "Rank " << myCanonRank << " receiving A from " << recvAFrom << " and B from " << recvBFrom << "\n\n";
+
+			if(recvAFrom != myCanonRank) {
+				A.recvFrom(recvAFrom, canComm, &recvRequest[0]);
+				waitFor[nWaitFor++] = recvRequest[0];
+			}
+			if(recvBFrom != myCanonRank) {
+				B.recvFrom(recvBFrom, canComm, &recvRequest[1]);
+				waitFor[nWaitFor++] = recvRequest[1];
+			}
+
+			HE(MPI_Waitall(nWaitFor, waitFor, MPI_STATUSES_IGNORE));
+
+			if(sendATo != myCanonRank) {
+				A.swap();
+			}
+			if(sendBTo != myCanonRank) {
+				B.swap();
+			}
 		}
 	}
 };
@@ -310,33 +390,27 @@ public:
 		// for gathering results
 		MPI_Comm_split(newworld, myKRank, myKGroup, &outsideKComm);
 		
-		// int s = std::min(pm, pn);
-		int myKCol = myKRank / pm;
-		int myKRow = myKRank % pm;
+		
 		MPI_Comm_split(newworld, myKGroup, myKRank, &insideKComm);
 		// communicator for printing results, only used by k group 0
-		myPrintRank =  myKRow * pn + myKCol;
-		MPI_Comm_split(newworld, myKGroup, myPrintRank, &resultPrintComm);
-
-		int rankOutside, rankInside, rankPrint;
-		MPI_Comm_rank(outsideKComm, &rankOutside);
-		MPI_Comm_rank(insideKComm, &rankInside);
-		MPI_Comm_rank(resultPrintComm, &rankPrint);
+		// int myKRow = myKRank % pn;
+		// int myKCol = myKRank / pn;
+		// myPrintRank =  myKRow * pn + myKCol;
+		// MPI_Comm_split(newworld, myKGroup, myPrintRank, &resultPrintComm);
+		// std::cout << "Rank " << myRank << " is in k group " << myKGroup << " and has k rank " << myKRank << " and print rank " << myPrintRank << "\n";
 
 
 		int cA = pn > pm ? pn / pm : 1;
 		int cB = pm > pn ? pm / pn : 1;
 
 		int firstAColIncl = myKGroup * k / pk;
-		int firstBRowIncl = myKRank * k / pk;
+		int firstBRowIncl = myKGroup * k / pk;
 
 		canonGroup = CanonGroup(m, n, k, pm, pn, pk, cA, cB, myKRank, firstAColIncl, firstBRowIncl, insideKComm);
 	}
 
 	void run(int seedA, int seedB) {
-		if(myKGroup == 0) {
-			canonGroup.generate(seedA, seedB);
-		}
+		canonGroup.generate(seedA, seedB);
 		canonGroup.run(seedA, seedB);
 	}
 
@@ -350,7 +424,7 @@ public:
 		if(myKGroup == 0) {
 			unsigned long long int count = canonGroup.countGeq(ge_value);
 			unsigned long long int result;
-			HE(MPI_Reduce(&count, &result, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, resultPrintComm));
+			HE(MPI_Reduce(&count, &result, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, insideKComm));
 			if(myKRank == 0) {
 				std::cout << result << "\n";
 			}
@@ -363,15 +437,18 @@ public:
 				for(int rowNum = 0; rowNum < m / pm; rowNum++) {
 					for(int colProc = 0; colProc < pn; colProc++) {
 						int curr = rowProc * pn + colProc;
+						int colIdx = colProc * n / pn;
+						int rowIdx = rowProc * m / pm + rowNum;
 						bool endline = colProc == pn - 1;
-						if(curr == 0 && myPrintRank == 0) {
+
+						if(curr == 0 && myKRank == 0) {
 							canonGroup.printRow(rowNum, endline);
-						} else if(myPrintRank == (rowProc * pn + colProc)) {
-							canonGroup.sendRow(rowNum, resultPrintComm);
-						} else if(myPrintRank == 0) {
-							canonGroup.recvPrintRow(rowProc * pn + colProc, resultPrintComm, endline);
+						} else if(curr > 0 && myKRank != 0) {
+							canonGroup.checkSendRow(rowIdx, colIdx, insideKComm);
+						} else if(curr > 0 && myKRank == 0) {
+							canonGroup.recvPrintRow(insideKComm, endline);
 						}
-						HE(MPI_Barrier(resultPrintComm));
+						HE(MPI_Barrier(insideKComm));
 					}
 				}
 			}

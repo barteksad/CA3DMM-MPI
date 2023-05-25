@@ -53,5 +53,22 @@ int main(int argc, char **argv)
         std::cout << std::endl;
       }
     }
+
+    std::cout << "A: \n";
+    for(int i = 0; i < m; i++)
+    {
+      for(int j = 0; j < k; j++)
+        std::cout << A[i][j] << " ";
+      std::cout << std::endl;
+    }
+
+    std::cout << "B: \n";
+    for(int i = 0; i < k; i++)
+    {
+      for(int j = 0; j < n; j++)
+        std::cout << B[i][j] << " ";
+      std::cout << std::endl;
+    }
   }
+
 }

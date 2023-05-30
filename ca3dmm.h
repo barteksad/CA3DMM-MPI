@@ -244,7 +244,7 @@ public:
 				//   << " --------------- \n\n";
 	}
 
-	void run(int seedA, int seedB) {
+	void run() {
 		redistribute();
 		initialCanonSkewSend();
 		for(int i = 0; i < s; i++) {
@@ -412,7 +412,7 @@ public:
 
 	void run(int seedA, int seedB) {
 		canonGroup.generate(seedA, seedB);
-		canonGroup.run(seedA, seedB);
+		canonGroup.run();
 	}
 
 	void gatherResults() {

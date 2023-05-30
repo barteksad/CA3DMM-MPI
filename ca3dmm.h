@@ -56,13 +56,16 @@ public:
 	Fragment(MatrixType type, int rowOffset, int colOffset, int numRows, int numCols)
 	: data(numRows * numCols, 0), recvBuffer(numRows * numCols, 0), type(type), rowOffset(rowOffset), colOffset(colOffset), numRows(numRows), numCols(numCols) {}
 
-	void generate(int seed) {
+	void generate(int seed, int trueNRows, int trueNCols) {
 		assert(type != MatrixType::C);
 		if(type == MatrixType::A) 
 		{
 			for(auto row = 0; row < numRows; row++) {
 				for(auto col = 0; col < numCols; col++) {
-					data[row * numCols + col] = generate_double(seed, row + rowOffset, col + colOffset);
+					if(row + rowOffset < trueNRows && col + colOffset < trueNCols)
+						data[row * numCols + col] = generate_double(seed, row + rowOffset, col + colOffset);
+					else
+						data[row * numCols + col] = 0;
 					// if(data[row * numCols + col] > 0) {
 					// 	std::cout << "A[" << row + rowOffset << ", " << col + colOffset << "] = " << data[row * numCols + col] << std::endl;
 					// }
@@ -73,7 +76,10 @@ public:
 		{
 			for(auto col = 0; col < numCols; col++) {
 				for(auto row = 0; row < numRows; row++) {
-					data[col * numRows + row] = generate_double(seed, row + rowOffset, col + colOffset);
+					if(row + rowOffset < trueNRows && col + colOffset < trueNCols)
+						data[col * numRows + row] = generate_double(seed, row + rowOffset, col + colOffset);
+					else
+						data[col * numRows + row] = 0;
 					// if(data[col * numRows + row] > 0) {
 					// 	std::cout << "B[" << row + rowOffset << ", " << col + colOffset << "] = " << data[col * numRows + row] << std::endl;
 					// }
@@ -125,28 +131,37 @@ public:
 		data = recvBuffer;
 	}
 
-	unsigned long long int countGeq(double ge_value) {
+	unsigned long long int countGeq(double ge_value, int trueNRows, int trueNCols) {
 		assert(type == MatrixType::C);
 		unsigned long long int count = 0;
 		for(auto row = 0; row < numRows; row++) {
 			for(auto col = 0; col < numCols; col++) {
-				if(data[row * numCols + col] >= ge_value) {
-					count++;
+				if(row + rowOffset < trueNRows && col + colOffset < trueNCols) {
+					if(data[row * numCols + col] >= ge_value) {
+						count++;
+					}
 				}
 			}
 		}
 		return count;
 	}
 
-	void printRow(int rowNum, bool endline) {
+	void printRow(int rowNum, bool endline, int nColsToPrint) {
 		assert(type == MatrixType::C);
-		for(auto col = 0; col < numCols; col++) {
+		for(auto col = 0; col < nColsToPrint; col++) {
 			std::cout << data[rowNum * numCols + col];
 			if(col == numCols - 1 && endline) {
 				std::cout << "\n";
 			} else {
 				std::cout << " ";
 			}
+		}
+
+		if(nColsToPrint < numCols) {
+			if(endline)
+				std::cout << "\n";
+			else
+				std::cout << " ";
 		}
 	}
 
@@ -159,16 +174,23 @@ public:
 		}
 	}
 
-	void recvPrintRow(MPI_Comm comm, bool endline) {
+	void recvPrintRow(MPI_Comm comm, bool endline, int nColsToPrint) {
 		assert(type == MatrixType::C);
 		HE(MPI_Recv(recvBuffer.data(), numCols, MPI_DOUBLE, MPI_ANY_SOURCE, 0, comm, MPI_STATUS_IGNORE));
-		for(auto col = 0; col < numCols; col++) {
+		for(auto col = 0; col < nColsToPrint; col++) {
 			std::cout << recvBuffer[col];
 			if(col == numCols - 1 && endline) {
 				std::cout << "\n";
 			} else {
 				std::cout << " ";
 			}
+		}
+
+		if(nColsToPrint < numCols) {
+			if(endline)
+				std::cout << "\n";
+			else
+				std::cout << " ";
 		}
 	}
 
@@ -253,13 +275,13 @@ public:
 		}
 	}
 
-	void generate(int seedA, int seedB) {
+	void generate(int seedA, int seedB, int trueM, int trueN, int trueK) {
 		// Only generate if we are in the first cannon group
 		if(myCanonGroup == 0 || cA == 1) {
-			A.generate(seedA);
+			A.generate(seedA, trueM, trueK);
 		}
 		if(myCanonGroup == 0 || cB == 1) {
-			B.generate(seedB);
+			B.generate(seedB, trueK, trueN);
 		}
 	}
 
@@ -267,20 +289,20 @@ public:
 		C.gatherResults(comm);
 	}
 
-	unsigned long long int countGeq(double ge_value) {
-		return C.countGeq(ge_value);
+	unsigned long long int countGeq(double ge_value, int trueM, int trueN) {
+		return C.countGeq(ge_value, trueM, trueN);
 	}
 
-	void printRow(int rowNum, bool endline) {
-		C.printRow(rowNum, endline);
+	void printRow(int rowNum, bool endline, int nColsToPrint) {
+		C.printRow(rowNum, endline, nColsToPrint);
 	}
 
 	void checkSendRow(int rowNum, int colNum, MPI_Comm comm) {
 		C.checkSendRow(rowNum, colNum, comm);
 	}
 
-	void recvPrintRow(MPI_Comm comm, bool endline) {
-		C.recvPrintRow(comm, endline);
+	void recvPrintRow(MPI_Comm comm, bool endline, int nColsToPrint) {
+		C.recvPrintRow(comm, endline, nColsToPrint);
 	}
 
 private:
@@ -384,8 +406,15 @@ private:
 class KTask
 {
 public:
-	KTask(int m, int n, int k, int pm, int pn, int pk, int myRank, MPI_Comm newworld)
-	: n(n), m(m), k(k), pm(pm), pn(pn), pk(pk) {
+	KTask(int trueM, int trueN, int trueK, int pm, int pn, int pk, int myRank, MPI_Comm newworld)
+	: trueN(trueN), trueM(trueM), trueK(trueK), pm(pm), pn(pn), pk(pk) {
+		m = std::ceil((double) trueM / (double) pm) * pm;
+		n = std::ceil((double) trueN / (double) pn) * pn;
+		k = std::ceil((double) trueK / (double) (pk * std::min(pm, pn))) * (pk * std::min(pm, pn));
+		// std::cout << "---\n" 
+		// << "n, m, k: " << n << ", " << m << ", " << k << "\n"
+		// << "trueN, trueM, trueK: " << trueN << ", " << trueM << ", " << trueK << "\n"
+		// << "pm, pn, pk: " << pm << ", " << pn << ", " << pk << "\n\n";
 		myKRank = myRank % (pm * pn);
 		myKGroup = myRank / (pm * pn);
 		// for gathering results
@@ -411,7 +440,7 @@ public:
 	}
 
 	void run(int seedA, int seedB) {
-		canonGroup.generate(seedA, seedB);
+		canonGroup.generate(seedA, seedB, trueM, trueN, trueK);
 		canonGroup.run();
 	}
 
@@ -423,7 +452,7 @@ public:
 
 	void countGeq(double ge_value) {
 		if(myKGroup == 0) {
-			unsigned long long int count = canonGroup.countGeq(ge_value);
+			unsigned long long int count = canonGroup.countGeq(ge_value, trueM, trueN);
 			unsigned long long int result;
 			HE(MPI_Reduce(&count, &result, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, insideKComm));
 			if(myKRank == 0) {
@@ -442,12 +471,23 @@ public:
 						int rowIdx = rowProc * m / pm + rowNum;
 						bool endline = colProc == pn - 1;
 
-						if(curr == 0 && myKRank == 0) {
-							canonGroup.printRow(rowNum, endline);
-						} else if(curr > 0 && myKRank != 0) {
+						// if(myKRank == 0) {
+
+						// std::cout << "curr: " << curr << "\n"
+						// 		  << "colIdx: " << colIdx << "\n"
+						// 		  << "rowIdx: " << rowIdx << "\n"
+						// 		  << "endline: " << endline << "\n\n";
+						// }
+
+						int nColsToPrint = std::min(n / pn, trueN - colIdx);
+						int rowOutOfBound = rowIdx >= trueM;
+
+						if(curr == 0 && myKRank == 0 && !rowOutOfBound) {
+							canonGroup.printRow(rowNum, endline, nColsToPrint);
+						} else if(curr > 0 && myKRank != 0 && !rowOutOfBound) {
 							canonGroup.checkSendRow(rowIdx, colIdx, insideKComm);
-						} else if(curr > 0 && myKRank == 0) {
-							canonGroup.recvPrintRow(insideKComm, endline);
+						} else if(curr > 0 && myKRank == 0 && !rowOutOfBound) {
+							canonGroup.recvPrintRow(insideKComm, endline, nColsToPrint);
 						}
 						HE(MPI_Barrier(insideKComm));
 					}
@@ -460,7 +500,8 @@ private:
 	int myKRank;
 	int myKGroup;
 	int myPrintRank;
-	int n, m, k;
+	int trueN, trueM, trueK;
+	int m, n, k;
 	int pm ,pn, pk;
 	MPI_Comm outsideKComm;
 	MPI_Comm insideKComm;

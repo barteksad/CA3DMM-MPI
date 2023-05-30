@@ -1,6 +1,8 @@
 mpiexec -n 8 ./ca3dmm 64 32 16 -s 1,1 -g 1
 mpiexec -n 8 ./ca3dmm 32 64 32 -s 1,1 -g 1
 mpiexec -n 8 ./ca3dmm 64 32 32 -s 1,1 -v
-mpiexec -n 8 ./ca3dmm 64 32 16 -s 13,17 -g 3.76342
+mpiexec -n 8 ./ca3dmm 64 32 16 -s 13,17 -g 3.76342 // 1338
+mpiexec -n 8 ./ca3dmm 17 33 81 -s 13,17 -g 3.76342 // 561
 mpiexec -n 16 ./ca3dmm 32 32 64 -s 1,1 -g 1
 mpiexec -n 16 ./ca3dmm 32 32 64 -s 1,13 -g 30
+mpiexec -n 16 ./ca3dmm 1234 333 777 -s 1,13 -g 30

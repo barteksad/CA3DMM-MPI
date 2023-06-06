@@ -121,6 +121,10 @@ public:
 		data = recvBuffer;
 	}
 
+	void reset() {
+		data = std::vector<double>(numRows * numCols, 0);
+	}
+
 	void distribute(MPI_Comm comm) {
 		HE(MPI_Bcast(data.data(), data.size(), MPI_DOUBLE, 0, comm));
 	}
@@ -285,6 +289,12 @@ public:
 		}
 	}
 
+	void reset() {
+		A.reset();
+		B.reset();
+		C.reset();
+	}
+
 	void gatherResults(MPI_Comm comm) {
 		C.gatherResults(comm);
 	}
@@ -440,6 +450,7 @@ public:
 	}
 
 	void run(int seedA, int seedB) {
+		canonGroup.reset();
 		canonGroup.generate(seedA, seedB, trueM, trueN, trueK);
 		canonGroup.run();
 	}

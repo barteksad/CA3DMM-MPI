@@ -4,7 +4,7 @@ SET(CMAKE_CXX_COMPILER mpicxx)   # use CC for okeanos
 project(CA3DMM CXX)
 
 SET(CMAKE_CXX_STANDARD 14)
-set (CMAKE_CXX_FLAGS "-std=c++14  -g3 -Wall -O0")
+set (CMAKE_CXX_FLAGS "-std=c++14 -O3 -Wall")
 
 include_directories(.)
 
@@ -16,4 +16,4 @@ add_executable(ca3dmm
 
 target_link_libraries(ca3dmm ${MPI_C_LIBRARIES})
 # target_compile_options(ca3dmm PRIVATE ${MPI_C_COMPILE_FLAGS} -Wall -Wextra -Wpedantic -Werror)
-target_compile_options(ca3dmm PRIVATE ${MPI_C_COMPILE_FLAGS} -Wall -Wextra -Wpedantic)
+target_compile_options(ca3dmm PRIVATE ${MPI_C_COMPILE_FLAGS})

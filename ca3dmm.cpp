@@ -17,28 +17,9 @@ int main(int argc, char **argv) {
 	MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
 
 	PArgs args = parse_args(argc, argv);
-	// if(myRank == 0)
-	// {
-	// 	std::cout << "n: " << args.n << std::endl;
-	// 	std::cout << "m: " << args.m << std::endl;
-	// 	std::cout << "k: " << args.k << std::endl;
-	// 	std::cout << "v: " << args.v_flag << std::endl;
-	// 	std::cout << "g: " << args.g_flag << std::endl;
-	// 	std::cout << "ge: " << args.ge_value << std::endl;
-	// 	std::cout << "seeds: " << std::endl;
-	// 	for (auto seed : args.seeds) {
-	// 		std::cout << seed.first << " " << seed.second << std::endl;
-	// 	}
-	// }
 
 	int pm, pn, pk;
 	std::tie(pm, pn, pk) = solve_for_pmpnpk(args.n, args.m, args.k, numProcesses);
-	// if(myRank == 0) {
-
-	// 	std::cout << "pm: " << pm << std::endl;
-	// 	std::cout << "pn: " << pn << std::endl;
-	// 	std::cout << "pk: " << pk << std::endl;
-	// }
 
 	// Exit processes with ranks not in [0, pm * pn * pk - 1]
 	MPI_Comm newworld;

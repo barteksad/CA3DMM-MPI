@@ -15,5 +15,4 @@ add_executable(ca3dmm
         ca3dmm.cpp)
 
 target_link_libraries(ca3dmm ${MPI_C_LIBRARIES})
-# target_compile_options(ca3dmm PRIVATE ${MPI_C_COMPILE_FLAGS} -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(ca3dmm PRIVATE ${MPI_C_COMPILE_FLAGS})

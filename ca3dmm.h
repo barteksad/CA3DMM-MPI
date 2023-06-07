@@ -66,9 +66,6 @@ public:
 						data[row * numCols + col] = generate_double(seed, row + rowOffset, col + colOffset);
 					else
 						data[row * numCols + col] = 0;
-					// if(data[row * numCols + col] > 0) {
-					// 	std::cout << "A[" << row + rowOffset << ", " << col + colOffset << "] = " << data[row * numCols + col] << std::endl;
-					// }
 				}
 			}
 		}
@@ -80,9 +77,6 @@ public:
 						data[col * numRows + row] = generate_double(seed, row + rowOffset, col + colOffset);
 					else
 						data[col * numRows + row] = 0;
-					// if(data[col * numRows + row] > 0) {
-					// 	std::cout << "B[" << row + rowOffset << ", " << col + colOffset << "] = " << data[col * numRows + row] << std::endl;
-					// }
 				}
 			}
 		}
@@ -101,8 +95,6 @@ public:
 				for(auto idx = 0; idx < A.numCols; idx++) {
 					sum += A.data[row * A.numCols + idx] * B.data[col * B.numRows + idx];
 				}
-				// if(sum > 0)
-				// 	std::cout << "C[" << row + A.rowOffset << "," << col + B.colOffset << "] += " << sum << "\n";
 				data[row * numCols + col] += sum;
 			}
 		}
@@ -198,8 +190,7 @@ public:
 		}
 	}
 
-// private:
-public:
+private:
 	// to increase locality of memory access, A is stored as row-major, B is stored as column-major
 	std::vector<double> data;
 	std::vector<double> recvBuffer;
@@ -230,7 +221,6 @@ public:
 		
 		A = Fragment(
 			MatrixType::A,
-			// cB == 1 ? (m / (pk * pm)) * (myCanonRank % pm) : (m / (pk * pn)) * myCanonGroup + (m / (pk * pn * pn)) * (myCanonRank % pn), // how many rows per process * my position in a row
 			cB == 1 ? (m / pm) * (myCanonRank % pm) : (m / cB) * myCanonGroup + (m / (cB * pn)) * (myCanonRank % pn), // how many rows per process * my position in a row
 			firstAColIncl + (k / (pk * s)) * (myCanonRank / s), // offset + per k task / how many columns per process  * my column position
 			(m / pm),
@@ -239,7 +229,6 @@ public:
 		B = Fragment(
 			MatrixType::B,
 			firstBRowIncl + (k / (pk * s)) * (myCanonRank % s), // offset + per k task / how many rows per process * my row position
-			// (n / (pn / cA)) * myCanonGroup + (n / pn) * (myCanonRank / s), // how many columns per process * my position in a column
 			cA == 1 ? (n / pn) * (myCanonRank / pn) : (n / cA) * myCanonGroup + (n / (cA * pm)) * (myCanonRank / pm), // how many columns per process * my position in a column
 			(k / (pk * s)),
 			(n / pn));
@@ -251,23 +240,6 @@ public:
 			(m / pm),
 			(n / pn)
 		);
-
-				// std::cout << "My kRank: " << myKRank << "\n"
-				//   << "My canon rank: " << myCanonRank << "\n"
-				//   << "My canon group: " << myCanonGroup << "\n"
-				//   << "A row offset: " << A.rowOffset << "\n"
-				//   << "A col offset: " << A.colOffset << "\n"
-				//   << "A num rows: " << A.numRows << "\n"
-				//   << "A num cols: " << A.numCols << "\n"
-				//   << "B row offset: " << B.rowOffset << "\n"
-				//   << "B col offset: " << B.colOffset << "\n"
-				//   << "B num rows: " << B.numRows << "\n"
-				//   << "B num cols: " << B.numCols << "\n"
-				// 	<< "C row offset: " << C.rowOffset << "\n"
-				// 	<< "C col offset: " << C.colOffset << "\n"			
-				// 	<< "C num rows: " << C.numRows << "\n"
-				// 	<< "C num cols: " << C.numCols << "\n"
-				//   << " --------------- \n\n";
 	}
 
 	void run() {
@@ -354,8 +326,6 @@ private:
 			A.recvFrom(recvAFrom, canComm, &recvRequest[0]);
 			B.recvFrom(recvBFrom, canComm, &recvRequest[1]);
 
-			// std::cout << "Rank " << myCanonRank << " sending A to " << sendATo << " and B to " << sendBTo << "\n" << "receiving A from " << recvAFrom << " and B from " << recvBFrom << "\n\n";
-
 			HE(MPI_Waitall(2, sendRequest, MPI_STATUSES_IGNORE));
 			HE(MPI_Waitall(2, recvRequest, MPI_STATUSES_IGNORE));
 
@@ -376,8 +346,6 @@ private:
 			int sendATo = (myCanonRank + s*(s - aSkew)) % (s*s);
 			int sendBTo = (myCanonRank - bOffset + (s - bSkew)) % s + bOffset;
 
-			// std::cout << "init: Rank " << myCanonRank << " sending A to " << sendATo << " and B to " << sendBTo << "\n";
-
 			if(sendATo != myCanonRank) {
 				A.sendTo(sendATo, canComm, &sendRequest[0]);
 				waitFor[nWaitFor++] = sendRequest[0];
@@ -389,8 +357,6 @@ private:
 
 			int recvAFrom = (myCanonRank + s*(s + aSkew)) % (s*s);
 			int recvBFrom = (myCanonRank - bOffset + bSkew) % s + bOffset;
-
-			// std::cout << "Rank " << myCanonRank << " receiving A from " << recvAFrom << " and B from " << recvBFrom << "\n\n";
 
 			if(recvAFrom != myCanonRank) {
 				A.recvFrom(recvAFrom, canComm, &recvRequest[0]);
@@ -418,27 +384,17 @@ class KTask
 public:
 	KTask(int trueM, int trueN, int trueK, int pm, int pn, int pk, int myRank, MPI_Comm newworld)
 	: trueN(trueN), trueM(trueM), trueK(trueK), pm(pm), pn(pn), pk(pk) {
+		// padding
 		m = std::ceil((double) trueM / (double) pm) * pm;
 		n = std::ceil((double) trueN / (double) pn) * pn;
 		k = std::ceil((double) trueK / (double) (pk * std::min(pm, pn))) * (pk * std::min(pm, pn));
-		// std::cout << "---\n" 
-		// << "n, m, k: " << n << ", " << m << ", " << k << "\n"
-		// << "trueN, trueM, trueK: " << trueN << ", " << trueM << ", " << trueK << "\n"
-		// << "pm, pn, pk: " << pm << ", " << pn << ", " << pk << "\n\n";
+
 		myKRank = myRank % (pm * pn);
 		myKGroup = myRank / (pm * pn);
 		// for gathering results
 		MPI_Comm_split(newworld, myKRank, myKGroup, &outsideKComm);
 		
-		
 		MPI_Comm_split(newworld, myKGroup, myKRank, &insideKComm);
-		// communicator for printing results, only used by k group 0
-		// int myKRow = myKRank % pn;
-		// int myKCol = myKRank / pn;
-		// myPrintRank =  myKRow * pn + myKCol;
-		// MPI_Comm_split(newworld, myKGroup, myPrintRank, &resultPrintComm);
-		// std::cout << "Rank " << myRank << " is in k group " << myKGroup << " and has k rank " << myKRank << " and print rank " << myPrintRank << "\n";
-
 
 		int cA = pn > pm ? pn / pm : 1;
 		int cB = pm > pn ? pm / pn : 1;
@@ -481,15 +437,7 @@ public:
 						int colIdx = colProc * n / pn;
 						int rowIdx = rowProc * m / pm + rowNum;
 						bool endline = colProc == pn - 1;
-
-						// if(myKRank == 0) {
-
-						// std::cout << "curr: " << curr << "\n"
-						// 		  << "colIdx: " << colIdx << "\n"
-						// 		  << "rowIdx: " << rowIdx << "\n"
-						// 		  << "endline: " << endline << "\n\n";
-						// }
-
+						
 						int nColsToPrint = std::min(n / pn, trueN - colIdx);
 						int rowOutOfBound = rowIdx >= trueM;
 
